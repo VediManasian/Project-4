@@ -1,4 +1,8 @@
 import csv
+import argparse
+import pymongo
+import pandas as pd
+
 
 baselight_Frames = []
 baselight_LinesSplit = []
@@ -10,7 +14,20 @@ final_dict = {}
 soloFrames = []
 Location_Frames = []
 
-with open("baselight_export_spring2025.txt", "r") as baselight, open("xytech_spring2025.txt", "r") as xytech:
+#Initilize argparse
+parser = argparse.ArgumentParser()
+parser.add_argument("--baselight", required=True)
+parser.add_argument("--xytech", required=True)
+args = parser.parse_args()
+
+
+#Initilize Database
+myclient = pymongo.MongoClient("mongodb://localhost:27017/")
+mydb = myclient["mydatabase"]
+baselightCol = mydb["baselight"]
+xytechCol = mydb["xytech"]
+
+with open(args.baselight, "r") as baselight, open(args.xytech, "r") as xytech:
     #Imported the Files and and parsed them to seperate lines
     baselight_Lines = baselight.read().splitlines()
     xytech_Lines = xytech.read().splitlines()
