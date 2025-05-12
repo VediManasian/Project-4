@@ -124,3 +124,6 @@ with open('output.csv', "w", newline="") as file:
     writer = csv.writer(file)
     writer.writerows(Sorted_frameRanges)
 
+
+    #TODO NEXT: Check if I have to seperate solo frames from the frameranges
+
