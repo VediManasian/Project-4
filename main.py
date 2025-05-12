@@ -13,57 +13,72 @@ xytech_comparisonLocation = []
 final_dict = {}
 soloFrames = []
 Location_Frames = []
+xytech_location_dict = {}
+xytech_location_listTuple = []
 
 #Initilize argparse
 parser = argparse.ArgumentParser()
-parser.add_argument("--baselight", required=True)
-parser.add_argument("--xytech", required=True)
+parser.add_argument("--baselight", nargs="+", required=True)
+parser.add_argument("--xytech", nargs="+", required=True)
 args = parser.parse_args()
 
 
 #Initilize Database
 myclient = pymongo.MongoClient("mongodb://localhost:27017/")
 mydb = myclient["mydatabase"]
+
 baselightCol = mydb["baselight"]
 xytechCol = mydb["xytech"]
+baselightCol.drop()
+xytechCol.drop()
 
-with open(args.baselight, "r") as baselight, open(args.xytech, "r") as xytech:
-    #Imported the Files and and parsed them to seperate lines
-    baselight_Lines = baselight.read().splitlines()
-    xytech_Lines = xytech.read().splitlines()
 
-    #Get all Frames from baselight
-    for i in baselight_Lines:
+
+def loadBaselight(data):
+    data_dict = {}
+    tempData = data
+    dataLines = tempData.read().splitlines()
+    for i in dataLines:
         frames = i.split()
         if frames:
-            baselight_Locations = frames.pop(0)
-            if baselight_Locations in baselight_dict:
-                baselight_dict[baselight_Locations].extend(frames)
+            directory = frames.pop(0)
+            if directory in data_dict:
+                data_dict[directory].extend(frames)
             else:
-                baselight_dict[baselight_Locations] = frames
-            baselight_Frames.append(frames) #Frames from baselight acquired as baselight_Frames
-    
-    #Get all the locations from Xytech
-    for i in xytech_Lines:
-        if i.startswith("/"):
-            xytech_Locations.append(i)
+                data_dict[directory] = frames
+    return data_dict
 
-            modified_location = i
-            modified_location = modified_location.split("/", 3)[3:] #possible optimization needed to remove bugs
-            xytech_comparisonLocation.append((modified_location))
-    
-    #Compare the locations and create a dict with the correct location associated with the appropriate frames
-    for location, frames in baselight_dict.items():
-        for i in range(len(xytech_comparisonLocation)): #possible optimization needed
-            if location.endswith(xytech_comparisonLocation[i][0]):
-                if xytech_Locations[i] in final_dict:
-                    final_dict[xytech_Locations[i]].extend(frames)
-                else:
-                    final_dict[xytech_Locations[i]] = frames #result final_dict
-    
-    #Create Frame Ranges and add them to a tupe associated with their location in a list, Location_Frames
-    #Also create a soloFrames list aswell for singular frames (Location_Frames contains singular frames aswell)
-    for location, frames in final_dict.items():
+def loadXytech(data):
+    directory = []
+    data_dict = {}
+    tempData = data
+    dataLines = tempData.read().splitlines()
+    for i in dataLines:
+        if "workorder" in i.lower():
+            workorderNumber = i.lower().split("workorder")[1].strip()
+        elif i.startswith("/"):
+            directory.append(i)
+    if workorderNumber in data_dict:
+        data_dict[workorderNumber].extend(directory)
+    else:
+        data_dict[workorderNumber] = directory
+    return data_dict
+
+def comparisonAlgorithm(baselight, xytech):
+    Dict = {}
+    for location, frames in baselight.items():
+        modifiedLocation = location.split("/", 2)[2:]
+        for workorder, directories in xytech.items():
+            for i in directories:
+                if i.endswith(modifiedLocation[0]):
+                    if i in Dict:
+                        Dict[i].extend(frames)
+                    else:
+                        Dict[i] = frames
+    return Dict
+
+def frameRanges(data):
+    for location, frames in data.items():
         current = [frames[0]]
         for i in range(1, len(frames)):
             if (int(frames[i]) - 1) == int(frames[i - 1]):
@@ -76,14 +91,36 @@ with open(args.baselight, "r") as baselight, open(args.xytech, "r") as xytech:
                     frameBlock = f"{current[0]}-{current[-1]}"
                 current = [frames[i]]
                 Location_Frames.append((location, frameBlock))
+    return (Location_Frames, soloFrames)
+#Main-------------------------------------------------------------------------------
 
-    #Sorting Algorithm Based On Frames for Location_Frames
-    
-    Sorted_Location_Frames = sorted(Location_Frames, key=lambda x: int(x[1].split("-")[0]))
-    print(Sorted_Location_Frames)
+    #Loads baselight into DB
+for baselight_file in args.baselight:
+    with open(baselight_file, "r") as baselight:
+        tempBaselightDict = loadBaselight(baselight)
+        document = [{"shot": s, "frames": f} for s, f in tempBaselightDict.items()]
+        baselightCol.insert_many(document)
+    #Loads xytech into DB
+for xytech_file in args.xytech:
+    with open(xytech_file, "r") as xytech:
+        tempXytechDict = loadXytech(xytech)
+        document = [{"workorder": w, "directories": d} for w, d in tempXytechDict.items()]
+        xytechCol.insert_many(document)
 
-    #Output Data to CSV
-    with open('output.csv', "w", newline="") as file:
-        writer = csv.writer(file)
-        writer.writerows(Sorted_Location_Frames)
+# Extracts the Data from baselight collection
+baselightDict = {doc["shot"]: doc["frames"] for doc in baselightCol.find()}
+# Extracts the Data from xytech collection
+xytechDict = {doc["workorder"]: doc["directories"] for doc in xytechCol.find()}
+
+frameDirectory = comparisonAlgorithm(baselight=baselightDict, xytech=xytechDict)
+
+frameRanges = frameRanges(frameDirectory)
+frameRangesWithLocation = frameRanges[0]
+soloFrames = frameRanges[1]
+
+Sorted_frameRanges = sorted(frameRangesWithLocation, key=lambda x: int(x[1].split("-")[0]))
+
+with open('output.csv', "w", newline="") as file:
+    writer = csv.writer(file)
+    writer.writerows(Sorted_frameRanges)
 
