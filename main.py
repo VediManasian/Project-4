@@ -2,6 +2,8 @@ import csv
 import argparse
 import pymongo
 import pandas as pd
+import ffmpeg
+import os
 
 
 baselight_Frames = []
@@ -18,6 +20,7 @@ xytech_location_listTuple = []
 parser = argparse.ArgumentParser()
 parser.add_argument("--baselight", nargs="+", required=True)
 parser.add_argument("--xytech", nargs="+", required=True)
+parser.add_argument("--process", nargs="+", required=True)
 args = parser.parse_args()
 
 
@@ -99,6 +102,32 @@ def seperateFrames(data):
         else:
             shots.append(i)
     return (shots, soloFrames)
+
+
+def time_conversion(frame):
+    fps = 24
+    frame = int(frame)
+    hour = frame // (3600 * fps)
+    frame %= (fps * 3600)
+    minutes = frame // (fps * 60)
+    frame %= (fps * 60)
+    seconds = frame // fps
+    frames = frame % fps
+    result = f"{hour:02}:{minutes:02}:{seconds:02}:{frames:02}"
+    return result
+
+def getTimecode(targetVideo):
+    info = ffmpeg.probe(targetVideo)
+    duration = float(info['format']['duration'])
+    return duration
+
+
+def add_time(shotsList):
+    result = []
+    for i in range(len(shotsList)):
+        targetRange = shots[i][1].split("-")
+        result.append([shotsList[i][0], shotsList[i][1], f"{time_conversion(float(targetRange[0]))}-{time_conversion(float(targetRange[1]))}"])
+    return result
 #Main-------------------------------------------------------------------------------
 
     #Loads baselight into DB
@@ -130,6 +159,34 @@ Sorted_frameRanges = sorted(frameRanges, key=lambda x: int(x[1].split("-")[0]))
 framesWithLocations = seperateFrames(Sorted_frameRanges)
 shots = framesWithLocations[0] #Frame Ranges
 soloShots = framesWithLocations[1] #Seperate Frames
+
+#Timecode/Main---------------------------------------------------------------------------
+
+videoTimecode = getTimecode(args.process[0])
+
+totalFrames = videoTimecode*24
+UNDESIRABLEandWORTHLESSshots = shots
+shotsInRange = []
+
+for i in range(len(shots)):
+    targetRange = shots[i][1].split("-")
+    if float(targetRange[0]) > totalFrames:
+        continue
+    elif float(targetRange[0]) < totalFrames and float(targetRange[1]) > totalFrames:
+        shotsInRange.append((shots[i][0], f"{targetRange[0]}-{round(totalFrames)}"))
+    else:
+        shotsInRange.append((shots[i]))
+
+
+needed_shots = add_time(shotsInRange)
+print(needed_shots)
+
+
+
+
+
+
+
 
 #Create CSV file of the Solo-Frames
 with open('output.csv', "w", newline="") as file:
