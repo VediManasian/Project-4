@@ -10,8 +10,6 @@ baselight_Locations = []
 baselight_dict = {}
 xytech_Locations = []
 xytech_comparisonLocation = []
-final_dict = {}
-soloFrames = []
 Location_Frames = []
 xytech_location_dict = {}
 xytech_location_listTuple = []
@@ -86,12 +84,21 @@ def frameRanges(data):
             else:
                 if len(current) == 1:
                     frameBlock = current[0]
-                    soloFrames.append((location, frameBlock))
                 else:
                     frameBlock = f"{current[0]}-{current[-1]}"
                 current = [frames[i]]
                 Location_Frames.append((location, frameBlock))
-    return (Location_Frames, soloFrames)
+    return Location_Frames
+
+def seperateFrames(data):
+    shots = []
+    soloFrames = []
+    for i in Sorted_frameRanges:
+        if len(i[1].split("-")) == 1:
+            soloFrames.append(i)
+        else:
+            shots.append(i)
+    return (shots, soloFrames)
 #Main-------------------------------------------------------------------------------
 
     #Loads baselight into DB
@@ -112,18 +119,24 @@ baselightDict = {doc["shot"]: doc["frames"] for doc in baselightCol.find()}
 # Extracts the Data from xytech collection
 xytechDict = {doc["workorder"]: doc["directories"] for doc in xytechCol.find()}
 
+#Compare Location and create the correct directory
 frameDirectory = comparisonAlgorithm(baselight=baselightDict, xytech=xytechDict)
-
 frameRanges = frameRanges(frameDirectory)
-frameRangesWithLocation = frameRanges[0]
-soloFrames = frameRanges[1]
 
-Sorted_frameRanges = sorted(frameRangesWithLocation, key=lambda x: int(x[1].split("-")[0]))
+#Sort the data by Frames
+Sorted_frameRanges = sorted(frameRanges, key=lambda x: int(x[1].split("-")[0]))
 
+#Seperate solo-frames and frame-ranges
+framesWithLocations = seperateFrames(Sorted_frameRanges)
+shots = framesWithLocations[0] #Frame Ranges
+soloShots = framesWithLocations[1] #Seperate Frames
+
+#Create CSV file of the Solo-Frames
 with open('output.csv', "w", newline="") as file:
     writer = csv.writer(file)
-    writer.writerows(Sorted_frameRanges)
+    writer.writerows(soloShots)
 
 
-    #TODO NEXT: Check if I have to seperate solo frames from the frameranges
+    #TODO 1. Create TimeFrames for the code
+    #TODO 2. Get the Thumbnails
 
