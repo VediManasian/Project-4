@@ -4,6 +4,8 @@ import pymongo
 import pandas as pd
 import ffmpeg
 import os
+import sys
+import openpyxl
 
 
 baselight_Frames = []
@@ -20,7 +22,8 @@ xytech_location_listTuple = []
 parser = argparse.ArgumentParser()
 parser.add_argument("--baselight", nargs="+", required=True)
 parser.add_argument("--xytech", nargs="+", required=True)
-parser.add_argument("--process", nargs="+", required=True)
+parser.add_argument("--process", nargs="+")
+parser.add_argument("--output", action="store_true")
 args = parser.parse_args()
 
 
@@ -160,26 +163,36 @@ framesWithLocations = seperateFrames(Sorted_frameRanges)
 shots = framesWithLocations[0] #Frame Ranges
 soloShots = framesWithLocations[1] #Seperate Frames
 
+if not args.output:
+    with open('output.csv', "w", newline="") as file:
+        writer = csv.writer(file)
+        writer.writerows(Sorted_frameRanges)
+
 #Timecode/Main---------------------------------------------------------------------------
+#to make sure the user has given process
+if args.output and not args.process:
+    print("ERROR: You must provice --process when giving --output")
+    sys.exit(1)
 
-videoTimecode = getTimecode(args.process[0])
+elif args.output and args.process:
+    videoTimecode = getTimecode(args.process[0])
 
-totalFrames = videoTimecode*24
-UNDESIRABLEandWORTHLESSshots = shots
-shotsInRange = []
+    totalFrames = videoTimecode*24
+    UNDESIRABLEandWORTHLESSshots = soloShots
+    shotsInRange = []
 
-for i in range(len(shots)):
-    targetRange = shots[i][1].split("-")
-    if float(targetRange[0]) > totalFrames:
-        continue
-    elif float(targetRange[0]) < totalFrames and float(targetRange[1]) > totalFrames:
-        shotsInRange.append((shots[i][0], f"{targetRange[0]}-{round(totalFrames)}"))
-    else:
-        shotsInRange.append((shots[i]))
+    for i in range(len(shots)):
+        targetRange = shots[i][1].split("-")
+        if float(targetRange[0]) > totalFrames:
+            UNDESIRABLEandWORTHLESSshots.append(shots[i])
+        elif float(targetRange[0]) < totalFrames and float(targetRange[1]) > totalFrames:
+            shotsInRange.append((shots[i][0], f"{targetRange[0]}-{round(totalFrames)}"))
+        else:
+            shotsInRange.append((shots[i]))
 
-
-needed_shots = add_time(shotsInRange)
-print(needed_shots)
+    shotsWithTime = add_time(shotsInRange)
+    df = pd.DataFrame(shotsWithTime, columns=["Location", "Frame Ranges", "Timecode Ranges"])
+    df.to_excel("output.xlsx", index=False)
 
 
 
@@ -189,9 +202,9 @@ print(needed_shots)
 
 
 #Create CSV file of the Solo-Frames
-with open('output.csv', "w", newline="") as file:
-    writer = csv.writer(file)
-    writer.writerows(soloShots)
+    with open('output.csv', "w", newline="") as file:
+        writer = csv.writer(file)
+        writer.writerows(UNDESIRABLEandWORTHLESSshots)
 
 
     #TODO 1. Create TimeFrames for the code
