@@ -3,20 +3,21 @@ import argparse
 import pymongo
 import pandas as pd
 import ffmpeg
-import os
 import sys
-import openpyxl
+import vimeo
+import time
 
 
-baselight_Frames = []
-baselight_LinesSplit = []
-baselight_Locations = []
-baselight_dict = {}
-xytech_Locations = []
-xytech_comparisonLocation = []
+
 Location_Frames = []
-xytech_location_dict = {}
-xytech_location_listTuple = []
+allThumbnails = []
+counter = 0
+
+client = vimeo.VimeoClient(
+    token='aeee7531eb1e85b514dc98d5fd9fdfd3',
+    key='8d86ddad50b80b3cfb123f51a25584f345e47591',
+    secret='HypJhnww9mRZ0TfBa8JzLLhdi12rI6fLtV8eSaatIq+UkMNchfFR42R83hpU5DmJIyS8yjLTWJAPFpmgk7u2WWDafctDX9lUGMvXWnrL690y7C8TSQHwFIph7rb2C0W9'
+)
 
 #Initilize argparse
 parser = argparse.ArgumentParser()
@@ -106,6 +107,15 @@ def seperateFrames(data):
             shots.append(i)
     return (shots, soloFrames)
 
+def timecode_to_seconds(timecode, fps=24):
+    time = timecode.split(":")
+    hours = int(time[0])
+    minutes = int(time[1])
+    seconds = int(time[2])
+    frames = int(time[3])
+
+    total_seconds = round(hours * 3600 + minutes * 60 + seconds + (frames / fps), 2)
+    return total_seconds
 
 def time_conversion(frame):
     fps = 24
@@ -122,8 +132,7 @@ def time_conversion(frame):
 def getTimecode(targetVideo):
     info = ffmpeg.probe(targetVideo)
     duration = float(info['format']['duration'])
-    return duration
-
+    return [duration]
 
 def add_time(shotsList):
     result = []
@@ -131,6 +140,44 @@ def add_time(shotsList):
         targetRange = shots[i][1].split("-")
         result.append([shotsList[i][0], shotsList[i][1], f"{time_conversion(float(targetRange[0]))}-{time_conversion(float(targetRange[1]))}"])
     return result
+
+def render_timeFrames(video, startTime, endTime):
+    output = f'{video[:-4]}_shot{counter}.mp4'
+
+    #add 1 second blackscreen to ensure video is atleast 1 second long because FFMPEG VIMEO YOUTUBE are ASPUIFCGQ)*^&!@R^FG)RBASBNOPDFQWB&*RFYWB)Y and they dont transcode the videos unless they are 1 second long despite other students videos transcoding eventhough I TRIED EVERYTHINGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGG
+    # #CHAJACERTIFIED 
+    probe = ffmpeg.probe(video)
+    video_stream = next(stream for stream in probe['streams'] if stream['codec_type'] == 'video')
+    width = video_stream['width']
+    height = video_stream['height']
+    framerate = eval(video_stream['r_frame_rate'])
+    main = ffmpeg.input(video, ss=startTime, to=endTime)
+    black = ffmpeg.input(f'color=c=black:s={width}x{height}:d=1:r={framerate}', f='lavfi')
+    silence = ffmpeg.input(f'anullsrc=channel_layout=stereo:sample_rate=48000', f='lavfi', t=1)
+    #----------------------------------------------------------------------------------------
+
+    (
+        ffmpeg
+        .concat(main.video, main.audio, black.video, silence.audio, v=1, a=1)
+        .output(output, vcodec='libx264', acodec='aac', movflags="+faststart")
+        .overwrite_output()
+        .run()
+    )
+    return output
+
+def thumbnail_creation(video):
+    output = f"{video[:-4]}_thumbnail.jpg"
+    duration = getTimecode(video)[0]
+    time = duration / 2
+    (
+        ffmpeg
+        .input(video, ss=0)
+        .output(output, vframes=1, vf="scale=96:74")
+        .overwrite_output()
+        .run()
+    )
+    allThumbnails.append(output)
+    return allThumbnails
 #Main-------------------------------------------------------------------------------
 
     #Loads baselight into DB
@@ -175,11 +222,12 @@ if args.output and not args.process:
     sys.exit(1)
 
 elif args.output and args.process:
-    videoTimecode = getTimecode(args.process[0])
-
+    videoTimecode = getTimecode(args.process[0])[0]
     totalFrames = videoTimecode*24
     UNDESIRABLEandWORTHLESSshots = soloShots
     shotsInRange = []
+
+    
 
     for i in range(len(shots)):
         targetRange = shots[i][1].split("-")
@@ -191,9 +239,41 @@ elif args.output and args.process:
             shotsInRange.append((shots[i]))
 
     shotsWithTime = add_time(shotsInRange)
-    df = pd.DataFrame(shotsWithTime, columns=["Location", "Frame Ranges", "Timecode Ranges"])
-    df.to_excel("output.xlsx", index=False)
+    print(shotsWithTime)
 
+ 
+    for i in range(len(shotsWithTime)):
+        timerange = shotsWithTime[i][2].split("-")
+        shotsWithTime[i].append('')
+        counter += 1
+        video = render_timeFrames(args.process[0], timecode_to_seconds(timerange[0]), timecode_to_seconds(timerange[1]))
+        time.sleep(2)
+        thumbnails = thumbnail_creation(video)
+        uri = client.upload(video, data={'name': f"{video}", "description": ""})
+        response = client.get(uri + '?fields=transcode.status').json()
+        if response['transcode']['status'] == 'complete':
+            print('Your video finished transcoding.')
+        elif response['transcode']['status'] == 'in_progress':
+            print('Your video is still transcoding.')
+        else:
+            print('Your video encountered an error during transcoding.')
+
+
+
+    
+
+
+    df = pd.DataFrame(shotsWithTime, columns=["Location", "Frame Ranges", "Timecode Ranges", "Thumbnails"])
+    with pd.ExcelWriter('output.xlsx', engine='xlsxwriter') as writer:
+        df.to_excel(writer, index=False, sheet_name="sheet1")
+        book = writer.book
+        sheet = writer.sheets["sheet1"]
+        for i in range(len(thumbnails)):
+            sheet.insert_image(f'D{i+2}', thumbnails[i])
+
+        
+
+    
 
 
 
@@ -207,6 +287,5 @@ elif args.output and args.process:
         writer.writerows(UNDESIRABLEandWORTHLESSshots)
 
 
-    #TODO 1. Create TimeFrames for the code
-    #TODO 2. Get the Thumbnails
+
 
